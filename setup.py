@@ -3,9 +3,8 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
-
-from distutils.core import setup, Extension
+from distutils.core import Extension
+from setuptools import setup, find_packages
 import os
 
 extra_compile_args = ["-std=c++11", "-DNDEBUG", "-O3"]
@@ -24,5 +23,7 @@ extension = Extension(
 setup(
     name="SEAL",
     version="1.0",
+    packages=["seal"],  # ✅ 明確指定只包含 seal 這個 package
     ext_modules=[extension],
 )
+

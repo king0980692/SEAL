@@ -14,8 +14,9 @@ from torch import nn
 import torch.distributed as dist
 
 from transformers import LogitsProcessor, BeamScorer, BeamSearchScorer, LogitsProcessorList, StoppingCriteriaList, HammingDiversityLogitsProcessor
-from transformers.generation_utils import BeamSearchOutput, validate_stopping_criteria, BeamSearchEncoderDecoderOutput, BeamSearchDecoderOnlyOutput
-from transformers.generation_logits_process import TopKLogitsWarper
+from transformers.generation.utils import BeamSearchOutput, BeamSearchEncoderDecoderOutput, BeamSearchDecoderOnlyOutput
+from transformers.generation.stopping_criteria import validate_stopping_criteria
+from transformers.generation.logits_process import TopKLogitsWarper
 
 from seal.index import FMIndex
 
@@ -245,7 +246,9 @@ def constrained_beam_search(
 
             # hack: adjust tokens for Marian. For Marian we have to make sure that the `pad_token_id`
             # cannot be generated both before and after the `nn.functional.log_softmax` operation.
-            next_token_logits = model.adjust_logits_during_generation(next_token_logits, cur_len=cur_len)
+            # Handle adjust_logits_during_generation for newer transformers versions  
+            if hasattr(model, 'adjust_logits_during_generation'):
+                next_token_logits = model.adjust_logits_during_generation(next_token_logits, cur_len=cur_len)
             if topk:
                 next_token_logits = topk_warper(input_ids, next_token_logits)
             next_token_scores = nn.functional.log_softmax(
@@ -328,8 +331,8 @@ def constrained_beam_search(
             model_kwargs = model._update_model_kwargs_for_generation(
                 outputs, model_kwargs, is_encoder_decoder=model.config.is_encoder_decoder
             )
-            if model_kwargs["past"] is not None:
-                model_kwargs["past"] = model._reorder_cache(model_kwargs["past"], beam_idx)
+            if model_kwargs.get("past_key_values") is not None:
+                model_kwargs["past_key_values"] = model._reorder_cache(model_kwargs["past_key_values"], beam_idx)
 
             if return_dict_in_generate and output_scores:
                 beam_indices = tuple((beam_indices[beam_idx[i]] + (beam_idx[i],) for i in range(len(beam_indices))))
@@ -337,7 +340,7 @@ def constrained_beam_search(
             # increase cur_len
             cur_len = cur_len + 1
 
-            if beam_scorer.is_done or stopping_criteria(input_ids, scores):
+            if beam_scorer.is_done or any(stopping_criteria(input_ids, scores)):
                 if not synced_gpus:
                     break
                 else:
@@ -427,22 +430,29 @@ def fm_index_generate(
     if eos_token_id is None:
         eos_token_id = model.config.eos_token_id
 
-    logits_processor = model._get_logits_processor(
-        encoder_input_ids=input_ids,
-        repetition_penalty=None,
-        no_repeat_ngram_size=0,
-        encoder_no_repeat_ngram_size=0,
-        bad_words_ids=None,
-        min_length=min_length,
+    # Create generation config for newer transformers API
+    from transformers import GenerationConfig
+    
+    generation_config = GenerationConfig(
         max_length=max_length,
-        eos_token_id=None,
-        prefix_allowed_tokens_fn=None,
-        forced_bos_token_id=forced_bos_token_id,
-        forced_eos_token_id=None,
+        min_length=min_length,
+        eos_token_id=eos_token_id,
         num_beams=num_beams,
         num_beam_groups=1,
         diversity_penalty=0.0,
-        remove_invalid_values=True)
+        remove_invalid_values=True,
+        no_repeat_ngram_size=0,
+        encoder_no_repeat_ngram_size=0,
+        bad_words_ids=None,
+        forced_bos_token_id=forced_bos_token_id,
+        forced_eos_token_id=None,
+    )
+    
+    logits_processor = model._get_logits_processor(
+        generation_config=generation_config,
+        encoder_input_ids=input_ids,
+        prefix_allowed_tokens_fn=None
+    )
 
     if diverse_bs_groups > 1 and diverse_bs_penalty > 0.0:
         logits_processor.append(
@@ -470,23 +480,31 @@ def fm_index_generate(
     else:
         constrained_decoding_processor = None
 
-    stopping_criteria = model._get_stopping_criteria(
-        max_length=max_length,
-        max_time=None,
-        #max_new_tokens=None,
-        #start_length=None
-        )
+    from transformers import StoppingCriteriaList, MaxLengthCriteria
+    stopping_criteria = StoppingCriteriaList([MaxLengthCriteria(max_length=max_length)])
 
 
     model_kwargs = model._prepare_encoder_decoder_kwargs_for_generation(
-        input_ids, {'attention_mask': attention_mask})
+        input_ids, {'attention_mask': attention_mask}, model_input_name='input_ids', generation_config=generation_config)
     model_kwargs['use_cache'] = True
 
-    decoder_input_ids = model._prepare_decoder_input_ids_for_generation(
+    decoder_start_token_id = model.config.decoder_start_token_id or model.config.pad_token_id
+    if decoder_start_token_id is None:
+        decoder_start_token_id = model.config.eos_token_id
+    decoder_start_tensor = torch.tensor([decoder_start_token_id], device=input_ids.device)
+    
+    decoder_input_ids, model_kwargs = model._prepare_decoder_input_ids_for_generation(
         batch_size=input_ids.size(0),
-        decoder_start_token_id=model.config.decoder_start_token_id, 
-        bos_token_id=model.config.bos_token_id,
+        model_input_name='input_ids',
+        model_kwargs=model_kwargs,
+        decoder_start_token_id=decoder_start_tensor,
     )
+    
+    # Initialize cache_position for newer transformers versions
+    if 'cache_position' not in model_kwargs:
+        model_kwargs['cache_position'] = torch.arange(0, decoder_input_ids.shape[1], device=input_ids.device)
+    if 'past_key_values' not in model_kwargs:
+        model_kwargs['past_key_values'] = None
     
     if keep_history:
 
@@ -515,7 +533,7 @@ def fm_index_generate(
         )
 
     decoder_input_ids, model_kwargs = model._expand_inputs_for_generation(
-        decoder_input_ids, 
+        input_ids=decoder_input_ids, 
         expand_size=num_beams, 
         is_encoder_decoder=True, 
         **model_kwargs)

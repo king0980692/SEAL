@@ -10,8 +10,8 @@
 %include "std_vector.i"
 
 namespace std {
-   %template(IntVector) vector<unsigned long>;
-   %template(IntVectorVector) vector<vector<unsigned long>>;
+   %template(IntVector) vector<unsigned long long>;
+   %template(IntVectorVector) vector<vector<unsigned long long>>;
 }
 
 %{

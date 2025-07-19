@@ -7,15 +7,16 @@
 #pragma once
 
 #include <sdsl/suffix_arrays.hpp>
+#include <cstdint>
 
 
 typedef sdsl::csa_wt_int<> fm_index_type;
 // typedef fm_index_type::size_type size_type;
 // typedef fm_index_type::value_type value_type;
 // typedef fm_index_type::char_type char_type;
-typedef unsigned long size_type;
-typedef unsigned long value_type;
-typedef unsigned long char_type;
+typedef unsigned long long size_type;
+typedef unsigned long long value_type;
+typedef unsigned long long char_type;
 
 class FMIndex {
     

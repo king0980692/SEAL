@@ -11,6 +11,7 @@
 #include <typeinfo>
 #include <thread>
 #include <future>
+#include <cstdint>
 
 using namespace sdsl;
 using namespace std;
@@ -20,9 +21,9 @@ typedef csa_wt_int<> fm_index_type;
 // typedef fm_index_type::size_type size_type;
 // typedef fm_index_type::value_type value_type;
 // typedef fm_index_type::char_type char_type;
-typedef unsigned long size_type;
-typedef unsigned long value_type;
-typedef unsigned long char_type;
+typedef unsigned long long size_type;
+typedef unsigned long long value_type;
+typedef unsigned long long char_type;
 
 FMIndex::FMIndex() {
     query_ = int_vector<>(4096);
@@ -51,18 +52,35 @@ size_type FMIndex::size() {
     return index.size();
 }
 
-
 const vector<size_type> FMIndex::backward_search_multi(const vector<char_type> query)
 {
     vector<size_type> output;
     size_type l = 0;
     size_type r = index.size();
-    for (size_type i = 0; i < query.size(); i++)
-        backward_search(index, l, r, (char_type) query[i], l, r);
+
+    for (size_type i = 0; i < query.size(); i++) {
+        size_type l_res = 0;
+        size_type r_res = 0;
+        backward_search(index, l, r, (char_type) query[i], l_res, r_res);
+        l = l_res;
+        r = r_res;
+    }
+
     output.push_back(l);
-    output.push_back(r+1);
+    output.push_back(r + 1);
     return output;
 }
+// const vector<size_type> FMIndex::backward_search_multi(const vector<char_type> query)
+// {
+//     vector<size_type> output;
+//     size_type l = 0;
+//     size_type r = index.size();
+//     for (size_type i = 0; i < query.size(); i++)
+//         backward_search(index, l, r, (char_type) query[i], l, r);
+//     output.push_back(l);
+//     output.push_back(r+1);
+//     return output;
+// }
 
 const vector<size_type> FMIndex::backward_search_step(char_type symbol, size_type low, size_type high) 
 {
