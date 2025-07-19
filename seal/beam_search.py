@@ -491,7 +491,7 @@ def fm_index_generate(
     decoder_start_token_id = model.config.decoder_start_token_id or model.config.pad_token_id
     if decoder_start_token_id is None:
         decoder_start_token_id = model.config.eos_token_id
-    decoder_start_tensor = torch.tensor([decoder_start_token_id], device=input_ids.device)
+    decoder_start_tensor = torch.tensor([decoder_start_token_id] * input_ids.size(0), device=input_ids.device)
     
     decoder_input_ids, model_kwargs = model._prepare_decoder_input_ids_for_generation(
         batch_size=input_ids.size(0),

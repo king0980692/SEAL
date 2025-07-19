@@ -82,7 +82,7 @@ def rescore_keys(model, inputs, list_of_decoded, batch_size=100, length_penalty=
     attention_mask = attention_mask.byte()
 
     encoder_outputs = model._prepare_encoder_decoder_kwargs_for_generation(
-        input_ids, {'attention_mask': attention_mask})['encoder_outputs'].last_hidden_state
+        input_ids, {'attention_mask': attention_mask}, model_input_name='input_ids', generation_config=model.generation_config)['encoder_outputs'].last_hidden_state
 
     decoder_inputs = enumerate(list_of_decoded)
     decoder_inputs = [(idx, di) for idx, ddi in decoder_inputs for di in ddi]
